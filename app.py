@@ -3,23 +3,53 @@ from docx import Document
 import json
 import requests
 import os
+import io
 
 st.set_page_config(page_title="Сравнение спецификаций", layout="wide")
 st.title("📄 Сравнение спецификаций оборудования")
 
-def extract_compact_data(file_bytes):
-    doc = Document(file_bytes)
+def extract_compact_data(file_obj):
+    """
+    Читает .docx, вытаскивает таблицы, возвращает компактный текст.
+    Плюс выводит в интерфейс отладочную информацию.
+    """
+    # Исправляем чтение байтов для Streamlit Cloud
+    doc = Document(io.BytesIO(file_obj.read()))
+    
     lines = []
+    tables_found = 0
+    rows_processed = 0
+    
     for table in doc.tables:
+        tables_found += 1
         if len(table.rows) < 2:
             continue
+            
         for row in table.rows:
             cells = [cell.text.strip() for cell in row.cells]
             if not any(cells):
                 continue
-            # Берем только первые 5 колонок, чтобы не тратить токены
+            
+            # Берем только первые 5 колонок
             compact_line = ";".join(cells[:5])
             lines.append(compact_line)
+            rows_processed += 1
+
+    # --- ОТЛАДКА: показываем, что реально ушло в нейросеть ---
+    if lines:
+        st.write(f"✅ Найдено таблиц: {tables_found}")
+        st.info(f"📦 Подготовлено строк для анализа: {rows_processed}")
+        
+        st.caption("👀 Первые 3 строки (формат: Код;Наименование;Ед;Кол;Цена):")
+        # st.code делает красивый моноширинный блок, чтобы видно было структуру
+        for line in lines[:3]:
+            st.code(line, language="text")
+        
+        # Если хочешь видеть ВСЁ (для очень маленьких файлов), раскомментируй строку ниже:
+        # st.write("Полный сырой список:", "\n".join(lines))
+    else:
+        st.warning("⚠️ В файлах не найдено данных в таблицах.")
+
     return "\n".join(lines)
 
 def get_llm_response(doc1_data, doc2_data):
@@ -101,7 +131,7 @@ if file1 and file2:
             
             if json_part:
                 st.dataframe(json_part)
-                import io, csv
+                import csv
                 output = io.StringIO()
                 if json_part:
                     writer = csv.DictWriter(output, fieldnames=json_part[0].keys())
